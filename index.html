@@ -1,0 +1,238 @@
+<!doctype html><html lang="nl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plattegrond – offline test</title><style>body{margin:0;font:16px system-ui;background:#f2f5f8;color:#192b3a}header{background:#17354c;color:white;padding:12px 16px}h2{margin:0 0 6px}main{padding:12px;max-width:1000px;margin:auto}button,input{font:inherit;padding:10px;border:1px solid #a9b6c3;border-radius:8px;background:white}button{cursor:pointer}button.active{background:#cbe7fa;border-color:#1681c2}.tools{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.mapwrap{background:white;border:1px solid #b5c0ca;overflow:hidden;touch-action:none}svg{width:100%;height:65vh;min-height:380px;display:block;touch-action:none}small{display:block;color:#536271;margin:8px 0}@media print{header,.tools,.note{display:none}main{padding:0}.mapwrap{border:0}svg{height:92vh}}@page{size:A4 portrait;margin:12mm}@media print{html,body{width:100%;margin:0;background:white}header,.tools,.note,#editor,#status,#cadsearch,main>label,main>small{display:none!important}main{max-width:none;padding:0;margin:0}.printheading{display:block!important;font:700 17pt system-ui,sans-serif;text-align:center;margin:0 0 7mm;color:#111}.mapwrap{width:100%;height:244mm;border:1px solid #777;box-sizing:border-box;overflow:hidden;break-inside:avoid}svg#map{width:100%;height:100%;min-height:0;touch-action:auto}#caption{display:none} } .printheading{display:none}</style><header><h2>Plattegrond</h2>Kadastrale kaart — bewerkbare meetpunten</header><main><div id="printheading" class="printheading"></div><div class="note"><b>Test de tekenfuncties.</b> Zoek een adres voor de officiële kadastrale kaart. Maatlijnen zijn nog schematisch en niet op schaal.</div><div class="tools"><button id="mark">▼ DKM plaatsen</button><button id="height">＋ Hoogtemeting plaatsen</button><button id="edit">✎ Selecteren / aanpassen</button><button id="measure">↗ Maatlijn</button><button id="move">✋ Verschuiven</button><button id="plus">＋ Inzoomen</button><button id="minus">－ Uitzoomen</button><button id="undo">↶ Ongedaan</button><button id="print">PDF downloaden</button><button id="printfallback" type="button">Afdrukken (reserve)</button></div><section id="cadsearch" style="background:#fff;border:1px solid #b5c0ca;border-radius:9px;padding:10px;margin:8px 0"><b>Kadastrale kaart zoeken</b><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:6px"><input id="cadquery" style="flex:1;min-width:210px" autocomplete="off" placeholder="Straat, huisnummer, plaats (bijv. Kalverstraat 25 Amsterdam)"><button type="button" id="cadgo">Zoek adres</button></div><div id="cadresults" style="display:none;border:1px solid #c9d4df;background:white;margin-top:4px"></div><small id="cadstatus" style="margin-top:5px">Zoek een adres. De kaart gebruikt de officiële kadastrale grenzen.</small></section><div id='editor' style='background:#fff;border:2px solid #b9c9d5;border-radius:10px;padding:12px;margin:10px 0'><b>Geselecteerd meetpunt aanpassen</b><div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px'><label>Naam / type<br><input id='pointname' placeholder='DKM1 of Dorpel' style='min-width:170px'></label><label>Maat / hoogte / toelichting<br><input id='pointnote' placeholder='Bijv. +0,46 m NAP' style='min-width:220px'></label><button id='savepoint' style='background:#176c9b;color:white;align-self:end'>Wijzigingen opslaan</button></div><small id='selectioninfo'>Plaats of selecteer een symbool op de tekening.</small></div><label>Project / adres <input id="address" placeholder="Bijv. Kalverstraat 25, Amsterdam" style="width:min(90%,400px)"></label><small id="status">Selecteer een functie en tik op de tekening. Na plaatsen schakelt de app automatisch naar selecteren. De symbolen zijn versleepbaar. Selecteer een punt en pas de naam en toelichting aan in de zichtbare invoervelden boven de tekening.</small><div class="mapwrap"><svg id="map" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg"><rect width="800" height="600" fill="#fafaf6"/><g id="scene"><image id="cadimage" x="0" y="0" width="800" height="600" preserveAspectRatio="none" style="display:none"/><g id="cadplaceholder"><rect x="90" y="60" width="620" height="465" fill="#f0efe6" stroke="#ad8551" stroke-width="3"/><text x="400" y="285" text-anchor="middle" font-size="25" fill="#456070">Zoek een adres voor de kadastrale kaart</text></g><g id="addressmarker" style="display:none;pointer-events:none"><circle cx="400" cy="300" r="3.5" fill="#8b2dbd" stroke="white" stroke-width="1"/></g><g id="draw"></g></g><text id="caption" x="20" y="585" font-size="17" fill="#333">Plattegrond – testtekening, niet op schaal</text></svg></div><small class="note">PDF: klik op PDF / Afdrukken en kies in het afdrukvenster ‘Opslaan als PDF’. De kaart heeft internet nodig. De ingetekende afstanden zijn handmatig en niet op schaal.</small></main><script>
+const svg=document.getElementById('map'),scene=document.getElementById('scene'),draw=document.getElementById('draw'),status=document.getElementById('status');
+const NS='http://www.w3.org/2000/svg';let mode='select',selected=null,first=null,items=[],nextDKM=1,drag=null,pan=null,scale=1,offsetX=0,offsetY=0;
+const $=id=>document.getElementById(id);
+function el(tag,attrs,parent=draw){const n=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);parent.append(n);return n}
+function active(){for(const id of ['mark','height','measure','move','edit'])$(id).classList.toggle('active',id===mode||(id==='edit'&&mode==='select'))}active();
+for(const id of ['mark','height','measure','move','edit'])$(id).onclick=()=>{mode=id==='edit'?'select':id;first=null;if(measureStartDot){measureStartDot.remove();measureStartDot=null;}measureDown=null;active();status.textContent=mode==='measure'?'Tik begin- en eindpunt; de lijn mag ook schuin zijn.':mode==='select'?'Klik een symbool om naam en tekst aan te passen.':mode==='height'?'Klik op de kaart om een hoogtemeting te plaatsen.':mode==='mark'?'Klik op de kaart om een DKM te plaatsen.':'Sleep de kaart om te verschuiven.'};
+function pos(e){let p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;const matrix=scene.getScreenCTM();return matrix?p.matrixTransform(matrix.inverse()):{x:400,y:300}}
+function refresh(g){let t=g.querySelectorAll('text');t[0].textContent=g.dataset.name;t[1].textContent=g.dataset.note}
+function select(g){selected=g;for(const item of items)item.classList?.toggle('chosen',item===g);$('pointname').value=g?.dataset.name||'';$('pointnote').value=g?.dataset.note||'';$('selectioninfo').textContent=g?'Geselecteerd: '+g.dataset.name+' — wijzig de velden en klik Opslaan.':'Geen punt geselecteerd.'}
+function marker(x,y,type){let g=el('g',{transform:`translate(${x} ${y})`});g.dataset.kind=type;g.dataset.name=type==='mark'?'DKM'+Math.min(nextDKM++,20):'Hoogtemeting';g.dataset.note='';g.dataset.x=x;g.dataset.y=y;g.dataset.draggable='yes';g.style.cursor='grab';
+el('rect',{x:-18,y:-18,width:36,height:36,fill:'transparent'},g);
+if(type==='mark')el('polygon',{points:'-4,-3 4,-3 0,4.5',fill:'#d11f27',stroke:'#901218','stroke-width':0.65},g);
+else el('path',{d:'M-4 0H4 M0 -4V4',fill:'none',stroke:'#d11f27','stroke-width':0.8,'stroke-linecap':'square'},g);
+el('text',{x:7,y:0,'font-size':5,'font-weight':'bold',fill:'#a4191d','pointer-events':'none'},g);
+el('text',{x:7,y:7,'font-size':4.5,fill:'#344a5a','pointer-events':'none'},g);
+items.push(g);refresh(g);select(g);mode='select';active();status.textContent='Punt geplaatst en geselecteerd. Wijzig nu naam of hoogte in de invoervelden.'}
+$('savepoint').onclick=()=>{if(!selected){status.textContent='Selecteer eerst een meetpunt.';return}selected.dataset.name=$('pointname').value.trim()||selected.dataset.name;selected.dataset.note=$('pointnote').value.trim();refresh(selected);select(selected);status.textContent='Wijzigingen opgeslagen.'};
+
+function line(a,b){
+ const value=prompt('Afstand / tekst (bijv. 4,00 m):','4,00 m');
+ if(value===null)return;
+ const g=el('g',{});
+ // Vrije richting: beide werkelijk aangeklikte punten blijven behouden.
+ const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);
+ if(len<2){g.remove();status.textContent='Kies twee verschillende punten.';return;}
+ const ux=dx/len,uy=dy/len,nx=-uy,ny=ux;
+ el('line',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:'#1672b5','stroke-width':0.85},g);
+ // Kleine open pijlen aan beide uiteinden.
+ for(const [p,sign] of [[a,1],[b,-1]]){
+   const tip=2.1;
+   el('path',{d:`M ${p.x+ux*sign*tip+nx*0.8} ${p.y+uy*sign*tip+ny*0.8} L ${p.x} ${p.y} L ${p.x+ux*sign*tip-nx*0.8} ${p.y+uy*sign*tip-ny*0.8}`,fill:'none',stroke:'#1672b5','stroke-width':0.8},g);
+ }
+ const x=(a.x+b.x)/2+nx*8,y=(a.y+b.y)/2+ny*8;
+ const t=el('text',{x,y,'font-size':5,'text-anchor':'middle','dominant-baseline':'middle',fill:'#07548c','paint-order':'stroke',stroke:'white','stroke-width':1.7,'stroke-linejoin':'round'},g);
+ t.textContent=value;
+ items.push(g);status.textContent='Vrije maatlijn toegevoegd (schematisch, niet op schaal).';
+}
+// Plaatsen gebeurt uitsluitend via een klik; slepen uitsluitend in selectiemodus.
+// Zo kunnen plaatsacties niet onbedoeld een sleepactie starten.
+function findMarker(target){
+  let node=target;
+  while(node && node!==svg){
+    if(node.getAttribute && node.getAttribute('data-draggable')==='yes')return node;
+    node=node.parentNode;
+  }
+  return null;
+}
+let moving=null, moved=false, suppressClick=false, measureStartDot=null, measureDown=null;
+svg.addEventListener('pointerdown',e=>{
+  if(e.button!==undefined && e.button!==0)return;
+  if(mode==='measure'){measureDown={x:e.clientX,y:e.clientY};return;}
+  if(mode==='select'){
+    const g=findMarker(e.target);
+    if(g){select(g);const p=pos(e);moving={g,startX:e.clientX,startY:e.clientY,dx:p.x-Number(g.dataset.x),dy:p.y-Number(g.dataset.y)};moved=false;}
+  }else if(mode==='move'){
+    pan={x:e.clientX,y:e.clientY,oldX:offsetX,oldY:offsetY};
+  }
+});
+svg.addEventListener('pointermove',e=>{
+  if(moving){
+    if(Math.hypot(e.clientX-moving.startX,e.clientY-moving.startY)>4)moved=true;
+    if(moved){const p=pos(e),x=p.x-moving.dx,y=p.y-moving.dy;
+      moving.g.setAttribute('transform',`translate(${x} ${y})`);
+      moving.g.dataset.x=x;moving.g.dataset.y=y;}
+  }else if(pan){const r=svg.getBoundingClientRect();offsetX=pan.oldX+(e.clientX-pan.x)*800/r.width;offsetY=pan.oldY+(e.clientY-pan.y)*600/r.height;transform();}
+});
+function stopPointer(){if(moved)suppressClick=true;moving=null;pan=null;moved=false;}
+svg.addEventListener('pointerup',e=>{
+  if(mode==='measure' && measureDown){
+    const delta=Math.hypot(e.clientX-measureDown.x,e.clientY-measureDown.y);
+    measureDown=null;
+    if(delta>12)return;
+    const p=pos(e);
+    if(first===null){
+      first=p;
+      measureStartDot=el('circle',{cx:p.x,cy:p.y,r:6,fill:'#1672b5',stroke:'white','stroke-width':2,'pointer-events':'none'});
+      status.textContent='Beginpunt gekozen. Tik nu op het eindpunt.';
+    }else{
+      const a=first;first=null;
+      if(measureStartDot){measureStartDot.remove();measureStartDot=null;}
+      line(a,p);
+    }
+    return;
+  }
+  stopPointer();
+});
+svg.addEventListener('pointercancel',()=>{measureDown=null;stopPointer()});
+svg.addEventListener('click',e=>{
+  if(suppressClick){suppressClick=false;return;}
+  if(mode==='mark'||mode==='height'){
+    const p=pos(e);marker(p.x,p.y,mode);return;
+  }
+  const g=findMarker(e.target);
+  if(mode==='select'){select(g);return;}
+  if(mode==='measure')return;
+});
+function transform(){scene.setAttribute('transform',`translate(${offsetX} ${offsetY}) scale(${scale})`)}
+// Het paarse adrespunt is op (400,300) binnen de kaartscene geplaatst.
+// Bij iedere zoomactie blijft dit punt exact midden in het kaartbeeld.
+function zoomAroundAddress(factor){
+  scale=Math.max(.35,Math.min(12,scale*factor));
+  offsetX=400-400*scale;
+  offsetY=300-300*scale;
+  transform();
+}
+$('plus').onclick=()=>zoomAroundAddress(1.25);
+$('minus').onclick=()=>zoomAroundAddress(1/1.25);$('undo').onclick=()=>{if(items.length){const last=items.pop();last.remove();if(last===selected)select(null)}first=null;if(measureStartDot){measureStartDot.remove();measureStartDot=null;}status.textContent='Laatste onderdeel verwijderd.'};// Alleen de afdrukweergave wijzigt; alle tekeninteracties blijven origineel.
+const originalViewBox=svg.getAttribute('viewBox');
+function currentPrintAddress(){
+  return ($('cadquery').dataset.selectedAddress || $('cadquery').value.trim() || $('address').value.trim() || 'Adres niet ingevuld').trim();
+}
+function updatePdfTitle(){
+  const address=currentPrintAddress();
+  const safe=address.replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,' ').trim();
+  document.title='Plattegrond - '+safe;
+  $('printheading').textContent='Plattegrond – '+address;
+}
+$('cadquery').addEventListener('input',()=>{delete $('cadquery').dataset.selectedAddress;updatePdfTitle();});
+$('address').addEventListener('input',updatePdfTitle);
+updatePdfTitle();
+function preparePrint(){
+  updatePdfTitle();
+  svg.setAttribute('viewBox','0 0 800 1050');
+  svg.setAttribute('preserveAspectRatio','xMidYMin meet');
+}
+function restorePrint(){svg.setAttribute('viewBox',originalViewBox);svg.removeAttribute('preserveAspectRatio');}
+window.addEventListener('beforeprint',preparePrint);
+window.addEventListener('afterprint',restorePrint);
+$('printfallback').onclick=()=>{preparePrint();setTimeout(()=>window.print(),150)};
+// Maak een A4-portret-PDF als directe download, zonder afhankelijk te zijn van Chrome's bestandsnaam.
+function pdfBytes(jpegBytes, imgW, imgH, heading){
+ const enc=new TextEncoder(), chunks=[], offsets=[0];let length=0;
+ const put=(data)=>{const a=typeof data==='string'?enc.encode(data):data;chunks.push(a);length+=a.length};
+ const obj=(n,data)=>{offsets[n]=length;put(n+' 0 obj\n'+data+'\nendobj\n')};
+ put('%PDF-1.4\n');
+ obj(1,'<< /Type /Catalog /Pages 2 0 R >>');
+ obj(2,'<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+ obj(3,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 4 0 R >> /Font << /F1 6 0 R >> >> /Contents 5 0 R >>');
+ offsets[4]=length;put('4 0 obj\n<< /Type /XObject /Subtype /Image /Width '+imgW+' /Height '+imgH+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+jpegBytes.length+' >>\nstream\n');put(jpegBytes);put('\nendstream\nendobj\n');
+ // Titel wordt in de kaartafbeelding getekend; PDF metadata krijgt dezelfde titel in Unicode-hex.
+ const content='q\n547 0 0 733 24 35 cm\n/Im0 Do\nQ\n';
+ obj(5,'<< /Length '+enc.encode(content).length+' >>\nstream\n'+content+'endstream\nendobj');
+ obj(6,'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+ const utf16='FEFF'+Array.from(heading).map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('').toUpperCase();
+ obj(7,'<< /Title <'+utf16+'> /Producer (Plattegrond) >>');
+ const xref=length;put('xref\n0 8\n0000000000 65535 f \n');for(let i=1;i<=7;i++)put(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
+ put('trailer\n<< /Size 8 /Root 1 0 R /Info 7 0 R >>\nstartxref\n'+xref+'\n%%EOF');
+ return new Blob(chunks,{type:'application/pdf'});
+}
+$('print').onclick=async()=>{
+ const btn=$('print');btn.disabled=true;
+ const old=btn.textContent;btn.textContent='PDF maken…';
+ try{
+   const address=currentPrintAddress();
+   const title='Plattegrond - '+address;
+   const clean=title.replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,' ').trim();
+   const clone=svg.cloneNode(true);
+   clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+   clone.setAttribute('width','800');clone.setAttribute('height','600');
+   clone.setAttribute('viewBox','0 0 800 600');
+   // Laad de kaart expliciet als afbeelding in het SVG. Een CORS-blokkade wordt helder gemeld.
+   const src=$('cadimage').getAttribute('href');
+   if(src && $('cadimage').style.display!=='none'){
+     const res=await fetch(src,{mode:'cors'});
+     if(!res.ok)throw Error('Kaartafbeelding niet beschikbaar ('+res.status+').');
+     const blob=await res.blob();
+     const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(blob)});
+     clone.querySelector('#cadimage').setAttribute('href',data);
+   }
+   const xml=new XMLSerializer().serializeToString(clone);
+   const blob=new Blob([xml],{type:'image/svg+xml;charset=utf-8'}),url=URL.createObjectURL(blob);
+   const image=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=()=>reject(Error('De tekening kon niet worden omgezet.'));i.src=url});
+   URL.revokeObjectURL(url);
+   const canvas=document.createElement('canvas');canvas.width=1600;canvas.height=2200;
+   const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,1600,2200);
+   ctx.fillStyle='#1b2832';ctx.font='bold 43px Arial, sans-serif';ctx.textAlign='center';
+   // Lange adressen worden automatisch verkleind.
+   let font=43;while(ctx.measureText('Plattegrond – '+address).width>1500 && font>22){font-=2;ctx.font='bold '+font+'px Arial, sans-serif'}
+   ctx.fillText('Plattegrond – '+address,800,110);
+   ctx.drawImage(image,35,160,1530,1148);
+   const jpeg=canvas.toDataURL('image/jpeg',.93).split(',')[1];
+   const binary=atob(jpeg),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+   const pdf=pdfBytes(bytes,canvas.width,canvas.height,title);
+   const link=document.createElement('a');link.href=URL.createObjectURL(pdf);link.download=clean+'.pdf';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),3000);
+ }catch(err){alert('PDF downloaden is niet gelukt: '+err.message+'\nGebruik eventueel Afdrukken (reserve).');}
+ finally{btn.disabled=false;btn.textContent=old}
+};
+
+// Alleen kadastrale achtergrond en adreszoeker; geen wijzigingen aan tekenfuncties.
+(function(){
+ const q=document.getElementById('cadquery'), go=document.getElementById('cadgo'), results=document.getElementById('cadresults'), info=document.getElementById('cadstatus'), image=document.getElementById('cadimage'), placeholder=document.getElementById('cadplaceholder');
+ const api='https://api.pdok.nl/bzk/locatieserver/search/v3_1/free';
+ let timer=0,seq=0;
+ function centerOf(doc){
+   const str=doc.centroide_ll||doc.centroide_rd||'';
+   const m=/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i.exec(str);
+   if(!m)return null;
+   let x=Number(m[1]),y=Number(m[2]);
+   if(str===doc.centroide_rd){info.textContent='Geen geografische coördinaten voor dit adres.';return null;}
+   return {lon:x,lat:y};
+ }
+ function setMap(doc){
+   const c=centerOf(doc);if(!c)return;
+   const name=doc.weergavenaam||doc.adresseerbaarobject_id||q.value;
+   q.value=name; q.dataset.selectedAddress=name; document.getElementById('address').value=name; updatePdfTitle();
+   results.style.display='none';results.replaceChildren();
+   // Web Mercator, ongeveer 160 x 120 m op maaiveld; 800x600 pixels.
+   const R=6378137,lat=Math.max(-85,Math.min(85,c.lat))*Math.PI/180;
+   const x=R*c.lon*Math.PI/180,y=R*Math.log(Math.tan(Math.PI/4+lat/2));
+   const width=160/Math.max(.2,Math.cos(lat)),height=120/Math.max(.2,Math.cos(lat));
+   const bbox=[x-width/2,y-height/2,x+width/2,y+height/2].join(',');
+   const base='https://service.pdok.nl/kadaster/brk-kadastrale-kaart/wms/v5_0';
+   const args=new URLSearchParams({SERVICE:'WMS',VERSION:'1.1.1',REQUEST:'GetMap',LAYERS:'Perceel,KadastraleGrens,Bebouwing,OpenbareRuimteNaam',STYLES:',,,',FORMAT:'image/png',TRANSPARENT:'FALSE',SRS:'EPSG:3857',BBOX:bbox,WIDTH:'2400',HEIGHT:'1800'});
+   image.setAttribute('href',base+'?'+args.toString());
+   image.style.display='block';placeholder.style.display='none';document.getElementById('addressmarker').style.display='';
+   info.textContent='Paars punt: locatie van het gevonden adres (niet noodzakelijk het geometrische midden van het perceel). Kaart opgevraagd voor '+name+'.';
+ }
+ async function search(){
+   const term=q.value.trim();if(term.length<3){results.style.display='none';return;}
+   const request=++seq;info.textContent='Adressen ophalen…';
+   try{
+     const url=api+'?'+new URLSearchParams({q:term,rows:'8',fq:'type:adres'});
+     const res=await fetch(url,{headers:{Accept:'application/json'}});
+     if(!res.ok)throw new Error('HTTP '+res.status);
+     const json=await res.json();if(request!==seq)return;
+     const docs=json.response?.docs||[];results.replaceChildren();
+     if(!docs.length){info.textContent='Geen adressen gevonden. Probeer straat, huisnummer en plaats.';results.style.display='none';return;}
+     for(const doc of docs){const b=document.createElement('button');b.type='button';b.textContent=doc.weergavenaam||'Adres';b.style.cssText='display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #eee;border-radius:0';b.onclick=()=>setMap(doc);results.append(b);}
+     results.style.display='block';info.textContent='Kies het juiste adres uit de lijst.';
+   }catch(err){if(request===seq){info.textContent='Adresdienst niet bereikbaar: '+err.message+'. Open deze app eventueel via HTTPS.';results.style.display='none';}}
+ }
+ q.addEventListener('input',()=>{delete q.dataset.selectedAddress;document.getElementById('addressmarker').style.display='none';clearTimeout(timer);timer=setTimeout(search,350)});
+ go.addEventListener('click',search);
+ q.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();clearTimeout(timer);search()}});
+ image.addEventListener('error',()=>{info.textContent='Kadastrale kaart kon niet laden. Controleer internettoegang of probeer de app via HTTPS.'});
+})();
+</script></html>
